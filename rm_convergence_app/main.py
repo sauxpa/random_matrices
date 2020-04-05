@@ -3,7 +3,7 @@ from scipy.stats import uniform, norm, semicircular
 import pandas as pd
 
 from bokeh.io import curdoc
-from bokeh.models import ColumnDataSource, Panel
+from bokeh.models import ColumnDataSource, Panel, Span
 from bokeh.models.widgets import Slider, Tabs, Div
 from bokeh.layouts import row, WidgetBox
 from bokeh.plotting import figure
@@ -96,6 +96,60 @@ def make_dataset_mp(N, n, gen_type, div_):
     return ColumnDataSource(df), ColumnDataSource(df_pdf)
 
 
+def make_dataset_large_cov(N, n, gen_type, eig1, freq1, eig2, freq2, eig3, freq3, div_):
+    """Creates a ColumnDataSource object with data to plot.
+    """
+    if gen_type == 1:
+        gen = uniform(
+            loc=-uniform.mean(scale=1/uniform.std()),
+            scale=1/uniform.std()
+        )
+        gen_type_str = 'Uniform'
+    else:
+        gen = norm
+        gen_type_str = 'Gaussian'
+
+    assert gen.mean() == 0.0, 'Random generator should be centered.'
+    assert gen.std() == 1.0, 'Random generator should be of unit variance.'
+
+    c = N / n
+    lambda_minus = (1 - np.sqrt(c)) ** 2
+    lambda_plus = (1 + np.sqrt(c)) ** 2
+
+    std_pop = np.array([eig1, eig2, eig3])
+    total = freq1+freq2+freq3
+    freq1 = freq1/total
+    freq2 = freq2/total
+    freq3 = freq3/total
+    std_pop_distr = np.array([freq1, freq2, freq3])
+    cov_pop_sqrt = np.diag(np.random.choice(std_pop, p=std_pop_distr, size=N) ** (0.5))
+
+    X = gen.rvs(size=N*n).reshape(N, n)
+    Y = np.dot(cov_pop_sqrt, X)
+    A = np.dot(Y, Y.T)/n
+
+    spectrum = np.linalg.eigvalsh(A)
+    hist, edges = np.histogram(spectrum, density=True, bins=50)
+
+    df = pd.DataFrame({'top': hist,
+                       'bottom': 0,
+                       'left': edges[:-1],
+                       'right': edges[1:],
+                       })
+
+    df_eig = pd.DataFrame({'top': std_pop_distr*3,
+                           'bottom': 0,
+                           'left': std_pop-0.01,
+                           'right': std_pop+0.01,
+                           })
+
+    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
+    div_.text = params_text
+
+    # Convert dataframe to column data source
+    return ColumnDataSource(df), ColumnDataSource(df_eig)
+
+
 def make_plot_wigner(src_wigner, src_pdf_wigner):
     """Create a figure object to host the plot.
     """
@@ -164,6 +218,42 @@ def make_plot_mp(src_mp, src_pdf_mp):
     return fig_mp
 
 
+def make_plot_large_cov(src_large_cov, src_eig_large_cov):
+    """Create a figure object to host the plot.
+    """
+    # Blank plot with correct labels
+    fig_large_cov = figure(plot_width=700,
+                           plot_height=700,
+                           title='Large covariance matrix',
+                           )
+
+    fig_large_cov.quad(top='top',
+                       bottom='bottom',
+                       left='left',
+                       right='right',
+                       source=src_large_cov,
+                       fill_color='navy',
+                       line_color='white',
+                       alpha=0.5,
+                       )
+
+    fig_large_cov.quad(top='top',
+                       bottom='bottom',
+                       left='left',
+                       right='right',
+                       source=src_eig_large_cov,
+                       fill_color='red',
+                       line_color='black',
+                       legend='Covariance eigenvalues',
+                       alpha=1,
+                       )
+
+    # Continuous pdf
+    # fig_large_cov.legend.click_policy = 'hide'
+    # fig_large_cov.legend.location = 'top_right'
+    return fig_large_cov
+
+
 def update_wigner(attr, old, new):
     """Update ColumnDataSource object.
     """
@@ -188,11 +278,43 @@ def update_mp(attr, old, new):
     n = n_select_mp.value
 
     # Create new ColumnDataSource
-    new_src_mp, new_src_pdf_mp = make_dataset_mp(N, n, gen_type, div_wigner)
+    new_src_mp, new_src_pdf_mp = make_dataset_mp(N, n, gen_type, div_mp)
 
     # Update the data on the plot
     src_mp.data.update(new_src_mp.data)
     src_pdf_mp.data.update(new_src_pdf_mp.data)
+
+
+def update_large_cov(attr, old, new):
+    """Update ColumnDataSource object.
+    """
+    # Change to selected values
+    gen_type = gen_type_select_large_cov.value
+    N = N_select_large_cov.value
+    n = n_select_large_cov.value
+    eig1 = eig_1_select_large_cov.value
+    freq1 = eig_1_freq_select_large_cov.value
+    eig2 = eig_2_select_large_cov.value
+    freq2 = eig_2_freq_select_large_cov.value
+    eig3 = eig_3_select_large_cov.value
+    freq3 = eig_3_freq_select_large_cov.value
+
+    # Create new ColumnDataSource
+    new_src_large_cov, new_src_eig_large_cov = make_dataset_large_cov(N,
+                                                                      n,
+                                                                      gen_type,
+                                                                      eig1,
+                                                                      freq1,
+                                                                      eig2,
+                                                                      freq2,
+                                                                      eig3,
+                                                                      freq3,
+                                                                      div_large_cov,
+                                                                      )
+
+    # Update the data on the plot
+    src_large_cov.data.update(new_src_large_cov.data)
+    src_eig_large_cov.data.update(new_src_eig_large_cov.data)
 
 
 ######################################################################
@@ -290,7 +412,126 @@ layout_mp = row(controls_mp, fig_mp)
 
 tab_mp = Panel(child=layout_mp, title='Marcenko-Pastur')
 
+######################################################################
+###
+### LARGE COVARIANCE MATRIX
+###
+######################################################################
+# Slider to select parameters
+gen_type_select_large_cov = Slider(start=1,
+                                   end=2,
+                                   step=1,
+                                   title='Entries distribution',
+                                   value=1,
+                                   )
+
+N_select_large_cov = Slider(start=1,
+                            end=2000,
+                            step=1,
+                            value=100,
+                            title='Number of variables'
+                            )
+
+n_select_large_cov = Slider(start=1,
+                            end=2000,
+                            step=1,
+                            value=1000,
+                            title='Number of samples'
+                            )
+
+eig_1_select_large_cov = Slider(start=0,
+                                end=1,
+                                step=0.05,
+                                value=0.2,
+                                title='Covariance eigenvalue 1'
+                                )
+
+eig_1_freq_select_large_cov = Slider(start=0,
+                                     end=1,
+                                     step=0.05,
+                                     value=0.33,
+                                     title='Frequency'
+                                     )
+
+eig_2_select_large_cov = Slider(start=0,
+                                end=1,
+                                step=0.05,
+                                value=0.5,
+                                title='Covariance eigenvalue 2'
+                                )
+
+eig_2_freq_select_large_cov = Slider(start=0,
+                                     end=1,
+                                     step=0.05,
+                                     value=0.33,
+                                     title='Frequency'
+                                     )
+
+eig_3_select_large_cov = Slider(start=0,
+                                end=1,
+                                step=0.05,
+                                value=0.8,
+                                title='Covariance eigenvalue 3'
+                                )
+
+eig_3_freq_select_large_cov = Slider(start=0,
+                                     end=1,
+                                     step=0.05,
+                                     value=0.33,
+                                     title='Frequency'
+                                     )
+
+# Update the plot when parameters are changed
+gen_type_select_large_cov.on_change('value', update_large_cov)
+N_select_large_cov.on_change('value', update_large_cov)
+n_select_large_cov.on_change('value', update_large_cov)
+
+eig_1_select_large_cov.on_change('value', update_large_cov)
+eig_1_freq_select_large_cov.on_change('value', update_large_cov)
+
+eig_2_select_large_cov.on_change('value', update_large_cov)
+eig_2_freq_select_large_cov.on_change('value', update_large_cov)
+
+eig_3_select_large_cov.on_change('value', update_large_cov)
+eig_3_freq_select_large_cov.on_change('value', update_large_cov)
+
+div_large_cov = Div(text='<b>Parameters:</b><br>', width=300, height=100)
+
+src_large_cov, src_eig_large_cov = make_dataset_large_cov(N_select_large_cov.value,
+                                                          n_select_large_cov.value,
+                                                          gen_type_select_large_cov.value,
+                                                          eig_1_select_large_cov.value,
+                                                          eig_1_freq_select_large_cov.value,
+                                                          eig_2_select_large_cov.value,
+                                                          eig_2_freq_select_large_cov.value,
+                                                          eig_3_select_large_cov.value,
+                                                          eig_3_freq_select_large_cov.value,
+                                                          div_large_cov,
+                                                          )
+
+fig_large_cov = make_plot_large_cov(src_large_cov, src_eig_large_cov)
+
+controls_large_cov = WidgetBox(N_select_large_cov,
+                               n_select_large_cov,
+                               gen_type_select_large_cov,
+                               eig_1_select_large_cov,
+                               eig_1_freq_select_large_cov,
+                               eig_2_select_large_cov,
+                               eig_2_freq_select_large_cov,
+                               eig_3_select_large_cov,
+                               eig_3_freq_select_large_cov,
+                               div_large_cov,
+                               width=300,
+                               )
+
+# Create a row layout
+layout_large_cov = row(controls_large_cov, fig_large_cov)
+
+# Make a tab with the layout
+
+tab_large_cov = Panel(child=layout_large_cov, title='Large covariance matrix')
+
 ### ALL TABS TOGETHER
-tabs = Tabs(tabs=[tab_wigner, tab_mp])
+tabs = Tabs(tabs=[tab_wigner, tab_mp, tab_large_cov])
 
 curdoc().add_root(tabs)
