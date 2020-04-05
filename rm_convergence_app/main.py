@@ -139,8 +139,8 @@ def make_dataset_large_cov(N, n, gen_type, eig1, freq1, eig2, freq2, eig3, freq3
 
     df_eig = pd.DataFrame({'top': std_pop_distr*3,
                            'bottom': 0,
-                           'left': std_pop-0.01,
-                           'right': std_pop+0.01,
+                           'left': std_pop-0.002,
+                           'right': std_pop+0.002,
                            })
 
     params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
