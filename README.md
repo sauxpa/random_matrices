@@ -11,3 +11,7 @@
 <img src="./marcenko_pastur.png"
      alt="Marcenko-Pastur"
      style="float: left; margin-right: 10px;" />
+
+<img src="./large_covariance.png"
+     alt="large_covariance"
+     style="float: left; margin-right: 10px;" />
