@@ -1,15 +1,18 @@
 import numpy as np
-from scipy.stats import uniform, norm, semicircular
+from scipy.stats import cauchy, norm, semicircular, uniform
 import pandas as pd
 
 from bokeh.io import curdoc
-from bokeh.models import ColumnDataSource, Panel, Span
-from bokeh.models.widgets import Slider, Tabs, Div
+from bokeh.models import ColumnDataSource, Panel
+from bokeh.models.widgets import Div, Slider, Tabs
 from bokeh.layouts import row, WidgetBox
 from bokeh.plotting import figure
 
 
-def gen_type_mgr(gen_type:int):
+MAX_GEN_TYPE = 3
+
+
+def gen_type_mgr(gen_type: int, check_moments=False):
     if gen_type == 1:
         gen = uniform(
             loc=-uniform.mean(scale=1/uniform.std()),
@@ -19,8 +22,16 @@ def gen_type_mgr(gen_type:int):
     elif gen_type == 2:
         gen = norm
         gen_type_str = 'Gaussian'
+    elif gen_type == 3:
+        gen = cauchy
+        gen_type_str = 'Cauchy'
     else:
         raise ValueError('Unknown generator type')
+
+    if check_moments:
+        assert gen.mean() == 0.0, 'Random generator should be centered.'
+        assert gen.std() == 1.0, 'Random generator should be of unit variance.'
+
     return gen, gen_type_str
 
 
@@ -28,9 +39,6 @@ def make_dataset_wigner(N, gen_type, div_):
     """Creates a ColumnDataSource object with data to plot.
     """
     gen, gen_type_str = gen_type_mgr(gen_type)
-
-    assert gen.mean() == 0.0, 'Random generator should be centered.'
-    assert gen.std() == 1.0, 'Random generator should be of unit variance.'
 
     A = np.empty((N, N))
     A[np.triu_indices(N, 1)] = gen.rvs(size=N*(N-1)//2)
@@ -51,7 +59,8 @@ def make_dataset_wigner(N, gen_type, div_):
     pdf = semicircular.pdf(xx, scale=2)
     df_pdf = pd.DataFrame({'xx': xx, 'pdf': pdf})
 
-    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
+    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution \
+    = {:s}</li></ul>'.format(gen_type_str)
     div_.text = params_text
 
     # Convert dataframe to column data source
@@ -62,9 +71,6 @@ def make_dataset_mp(N, n, gen_type, div_):
     """Creates a ColumnDataSource object with data to plot.
     """
     gen, gen_type_str = gen_type_mgr(gen_type)
-
-    assert gen.mean() == 0.0, 'Random generator should be centered.'
-    assert gen.std() == 1.0, 'Random generator should be of unit variance.'
 
     c = N / n
     lambda_minus = (1 - np.sqrt(c)) ** 2
@@ -83,29 +89,37 @@ def make_dataset_mp(N, n, gen_type, div_):
                        })
 
     xx = np.linspace(np.min(spectrum) * 0.9, np.max(spectrum) * 1.1, 200)
-    marcenko_pastur_pdf = lambda x: np.sqrt((lambda_plus-x)*(x-lambda_minus))/(2*np.pi*c*x) if x > lambda_minus and x < lambda_plus else 0.0
+
+    def marcenko_pastur_pdf(x: float):
+        return np.sqrt(
+            (lambda_plus - x) * (x - lambda_minus)
+            ) / (2*np.pi*c*x) if x > lambda_minus and x < lambda_plus else 0.0
 
     pdf = list(map(marcenko_pastur_pdf, xx))
     df_pdf = pd.DataFrame({'xx': xx, 'pdf': pdf})
 
-    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
+    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution \
+    = {:s}</li></ul>'.format(gen_type_str)
     div_.text = params_text
 
     # Convert dataframe to column data source
     return ColumnDataSource(df), ColumnDataSource(df_pdf)
 
 
-def make_dataset_large_cov(N, n, gen_type, eig1, freq1, eig2, freq2, eig3, freq3, div_):
+def make_dataset_large_cov(N,
+                           n,
+                           gen_type,
+                           eig1,
+                           freq1,
+                           eig2,
+                           freq2,
+                           eig3,
+                           freq3,
+                           div_
+                           ):
     """Creates a ColumnDataSource object with data to plot.
     """
     gen, gen_type_str = gen_type_mgr(gen_type)
-
-    assert gen.mean() == 0.0, 'Random generator should be centered.'
-    assert gen.std() == 1.0, 'Random generator should be of unit variance.'
-
-    c = N / n
-    lambda_minus = (1 - np.sqrt(c)) ** 2
-    lambda_plus = (1 + np.sqrt(c)) ** 2
 
     std_pop = np.array([eig1, eig2, eig3])
     total = freq1+freq2+freq3
@@ -113,7 +127,9 @@ def make_dataset_large_cov(N, n, gen_type, eig1, freq1, eig2, freq2, eig3, freq3
     freq2 = freq2/total
     freq3 = freq3/total
     std_pop_distr = np.array([freq1, freq2, freq3])
-    cov_pop_sqrt = np.diag(np.random.choice(std_pop, p=std_pop_distr, size=N) ** (0.5))
+    cov_pop_sqrt = np.diag(
+        np.random.choice(std_pop, p=std_pop_distr, size=N) ** (0.5)
+        )
 
     X = gen.rvs(size=N*n).reshape(N, n)
     Y = np.dot(cov_pop_sqrt, X)
@@ -134,7 +150,8 @@ def make_dataset_large_cov(N, n, gen_type, eig1, freq1, eig2, freq2, eig3, freq3
                            'right': std_pop+0.002,
                            })
 
-    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
+    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution \
+    = {:s}</li></ul>'.format(gen_type_str)
     div_.text = params_text
 
     # Convert dataframe to column data source
@@ -146,9 +163,6 @@ def make_dataset_general(N, gen_type, div_):
     """
     gen, gen_type_str = gen_type_mgr(gen_type)
 
-    assert gen.mean() == 0.0, 'Random generator should be centered.'
-    assert gen.std() == 1.0, 'Random generator should be of unit variance.'
-
     A = gen.rvs(size=N**2).reshape(N, N) / np.sqrt(N)
 
     spectrum = np.linalg.eigvals(A)
@@ -158,7 +172,8 @@ def make_dataset_general(N, gen_type, div_):
                        'y': y,
                        })
 
-    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution = {:s}</li></ul>'.format(gen_type_str)
+    params_text = '<b>Parameters:</b><br><ul><li>Entries distribution \
+    = {:s}</li></ul>'.format(gen_type_str)
     div_.text = params_text
 
     # Convert dataframe to column data source
@@ -297,7 +312,10 @@ def update_wigner(attr, old, new):
     N = N_select_wigner.value
 
     # Create new ColumnDataSource
-    new_src_wigner, new_src_pdf_wigner = make_dataset_wigner(N, gen_type, div_wigner)
+    new_src_wigner, new_src_pdf_wigner = make_dataset_wigner(N,
+                                                             gen_type,
+                                                             div_wigner
+                                                             )
 
     # Update the data on the plot
     src_wigner.data.update(new_src_wigner.data)
@@ -335,17 +353,18 @@ def update_large_cov(attr, old, new):
     freq3 = eig_3_freq_select_large_cov.value
 
     # Create new ColumnDataSource
-    new_src_large_cov, new_src_eig_large_cov = make_dataset_large_cov(N,
-                                                                      n,
-                                                                      gen_type,
-                                                                      eig1,
-                                                                      freq1,
-                                                                      eig2,
-                                                                      freq2,
-                                                                      eig3,
-                                                                      freq3,
-                                                                      div_large_cov,
-                                                                      )
+    new_src_large_cov, new_src_eig_large_cov \
+        = make_dataset_large_cov(N,
+                                 n,
+                                 gen_type,
+                                 eig1,
+                                 freq1,
+                                 eig2,
+                                 freq2,
+                                 eig3,
+                                 freq3,
+                                 div_large_cov,
+                                 )
 
     # Update the data on the plot
     src_large_cov.data.update(new_src_large_cov.data)
@@ -367,17 +386,15 @@ def update_general(attr, old, new):
 
 
 ######################################################################
-###
-### WIGNER
-###
+# WIGNER
 ######################################################################
 # Slider to select parameters
 gen_type_select_wigner = Slider(start=1,
-                               end=2,
-                               step=1,
-                               title='Entries distribution',
-                               value=1,
-                               )
+                                end=MAX_GEN_TYPE,
+                                step=1,
+                                title='Entries distribution',
+                                value=1,
+                                )
 
 N_select_wigner = Slider(start=1,
                          end=2000,
@@ -392,7 +409,10 @@ N_select_wigner.on_change('value', update_wigner)
 
 div_wigner = Div(text='<b>Parameters:</b><br>', width=300, height=100)
 
-src_wigner, src_pdf_wigner = make_dataset_wigner(N_select_wigner.value, gen_type_select_wigner.value, div_wigner)
+src_wigner, src_pdf_wigner = make_dataset_wigner(N_select_wigner.value,
+                                                 gen_type_select_wigner.value,
+                                                 div_wigner
+                                                 )
 
 fig_wigner = make_plot_wigner(src_wigner, src_pdf_wigner)
 
@@ -411,13 +431,11 @@ tab_wigner = Panel(child=layout_wigner, title='Wigner')
 
 
 ######################################################################
-###
-### MARCENKO-PASTUR
-###
+# MARCENKO-PASTUR
 ######################################################################
 # Slider to select parameters
 gen_type_select_mp = Slider(start=1,
-                            end=2,
+                            end=MAX_GEN_TYPE,
                             step=1,
                             title='Entries distribution',
                             value=1,
@@ -444,7 +462,11 @@ n_select_mp.on_change('value', update_mp)
 
 div_mp = Div(text='<b>Parameters:</b><br>', width=300, height=100)
 
-src_mp, src_pdf_mp = make_dataset_mp(N_select_mp.value, n_select_mp.value, gen_type_select_mp.value, div_mp)
+src_mp, src_pdf_mp = make_dataset_mp(N_select_mp.value,
+                                     n_select_mp.value,
+                                     gen_type_select_mp.value,
+                                     div_mp
+                                     )
 
 fig_mp = make_plot_mp(src_mp, src_pdf_mp)
 
@@ -464,13 +486,11 @@ tab_mp = Panel(child=layout_mp, title='Marcenko-Pastur')
 
 
 ######################################################################
-###
-### LARGE COVARIANCE MATRIX
-###
+# LARGE COVARIANCE MATRIX
 ######################################################################
 # Slider to select parameters
 gen_type_select_large_cov = Slider(start=1,
-                                   end=2,
+                                   end=MAX_GEN_TYPE,
                                    step=1,
                                    title='Entries distribution',
                                    value=1,
@@ -548,17 +568,18 @@ eig_3_freq_select_large_cov.on_change('value', update_large_cov)
 
 div_large_cov = Div(text='<b>Parameters:</b><br>', width=300, height=100)
 
-src_large_cov, src_eig_large_cov = make_dataset_large_cov(N_select_large_cov.value,
-                                                          n_select_large_cov.value,
-                                                          gen_type_select_large_cov.value,
-                                                          eig_1_select_large_cov.value,
-                                                          eig_1_freq_select_large_cov.value,
-                                                          eig_2_select_large_cov.value,
-                                                          eig_2_freq_select_large_cov.value,
-                                                          eig_3_select_large_cov.value,
-                                                          eig_3_freq_select_large_cov.value,
-                                                          div_large_cov,
-                                                          )
+src_large_cov, src_eig_large_cov \
+    = make_dataset_large_cov(N_select_large_cov.value,
+                             n_select_large_cov.value,
+                             gen_type_select_large_cov.value,
+                             eig_1_select_large_cov.value,
+                             eig_1_freq_select_large_cov.value,
+                             eig_2_select_large_cov.value,
+                             eig_2_freq_select_large_cov.value,
+                             eig_3_select_large_cov.value,
+                             eig_3_freq_select_large_cov.value,
+                             div_large_cov,
+                             )
 
 fig_large_cov = make_plot_large_cov(src_large_cov, src_eig_large_cov)
 
@@ -584,13 +605,11 @@ tab_large_cov = Panel(child=layout_large_cov, title='Large covariance matrix')
 
 
 ######################################################################
-###
-### GENERAL CASE (Non-Hermitian matrix rescaled by 1/sqrt(N))
-###
+# GENERAL CASE (Non-Hermitian matrix rescaled by 1/sqrt(N))
 ######################################################################
 # Slider to select parameters
 gen_type_select_general = Slider(start=1,
-                                 end=2,
+                                 end=MAX_GEN_TYPE,
                                  step=1,
                                  title='Entries distribution',
                                  value=1,
@@ -609,7 +628,10 @@ N_select_general.on_change('value', update_general)
 
 div_general = Div(text='<b>Parameters:</b><br>', width=300, height=100)
 
-src_general = make_dataset_general(N_select_general.value, gen_type_select_general.value, div_general)
+src_general = make_dataset_general(N_select_general.value,
+                                   gen_type_select_general.value,
+                                   div_general
+                                   )
 
 fig_general = make_plot_general(src_general)
 
@@ -627,7 +649,7 @@ layout_general = row(controls_general, fig_general)
 tab_general = Panel(child=layout_general, title='General case')
 
 
-### ALL TABS TOGETHER
+# ALL TABS TOGETHER
 tabs = Tabs(tabs=[tab_wigner, tab_mp, tab_large_cov, tab_general])
 
 curdoc().add_root(tabs)
